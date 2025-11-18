@@ -1,0 +1,322 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Accessible Event Card — Braille Sticker Generator</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+  :root{--bg:#fff;--panel:#fff;--muted:#667085;--accent:#ff6b6b}
+  *{box-sizing:border-box}
+  body{font-family:Inter,system-ui,-apple-system,Segoe UI,Roboto,Arial;margin:0;padding:18px;background:#f6f7fb;color:#0b1220}
+  .wrap{max-width:1100px;margin:0 auto;display:flex;gap:18px}
+  form{width:380px;background:var(--panel);padding:18px;border-radius:12px;box-shadow:0 6px 18px rgba(16,24,40,0.06)}
+  h1{font-size:18px;margin:0 0 12px}
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:8px}
+  label.opt{display:flex;align-items:center;gap:10px;padding:8px;border-radius:8px;border:1px solid #eef2f7}
+  input[type=checkbox]{width:18px;height:18px}
+  .controls{display:flex;gap:8px;margin-top:12px}
+  button{padding:10px 12px;border-radius:8px;border:0;background:#0b4f6c;color:#fff;cursor:pointer}
+  button.secondary{background:#fff;color:#0b4f6c;border:1px solid #e6e9ee}
+
+  .preview{flex:1;display:flex;flex-direction:column;gap:12px;align-items:center}
+  .sticker-wrap{background:#fff;padding:14px;border-radius:12px;box-shadow:0 6px 18px rgba(16,24,40,0.06)}
+  /* prevent the canvas from intercepting clicks so form controls remain interactive */
+  canvas{background:#ffebf2;border-radius:12px;pointer-events:none}
+  .outputs{width:100%;display:flex;flex-direction:column;gap:10px}
+  textarea{width:100%;min-height:80px;padding:10px;border-radius:8px;border:1px solid #eef2f7}
+  .note{font-size:13px;color:var(--muted)}
+  .small-controls{display:flex;gap:8px}
+  .row{display:flex;gap:8px}
+
+  @media (max-width:1000px){.wrap{flex-direction:column}.preview{align-items:stretch}}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <form id="form" onsubmit="return false;">
+      <h1>Accessible Event Card — Braille Sticker</h1>
+      <p class="note">Tick the accessibility features available at your event. The generator will create a tactile-style sticker that spells <strong>"Warwick SU"</strong> in braille; each raised dot becomes an icon for one feature. It also creates a detailed post and a full descriptive alt text for screen readers.</p>
+
+      <div class="grid" id="options"></div>
+
+      <div class="controls">
+        <button id="renderBtn">Render sticker</button>
+        <button id="downloadBtn" class="secondary">Download sticker PNG</button>
+        <button id="resetBtn" type="button">Reset</button>
+      </div>
+    </form>
+
+    <div class="preview">
+      <div class="sticker-wrap">
+        <canvas id="stickerCanvas" width="720" height="220" aria-label="Braille sticker preview"></canvas>
+      </div>
+
+      <div class="outputs">
+        <label>Detail post (category-grouped):</label>
+        <textarea id="detailPost" readonly></textarea>
+
+        <label>Full descriptive alt text (for screen readers):</label>
+        <textarea id="altText" readonly></textarea>
+
+        <div class="row">
+          <button id="copyAlt">Copy alt text</button>
+          <button id="copyPost" class="secondary">Copy detail post</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+<script>
+// Categories (extracted from your mock)
+const categories = [
+  {key:'toilets', label:'Toilets', emoji:'🚻'},
+  {key:'gender_neutral', label:'Gender-neutral toilets', emoji:'🚻'},
+  {key:'disabled_toilets', label:'Disabled toilets', emoji:'♿'},
+  {key:'changing_places', label:'Changing Places', emoji:'🧑‍🦽'},
+
+  {key:'step_free', label:'Step-free access', emoji:'🟢'},
+  {key:'seating', label:'Seating available', emoji:'💺'},
+  {key:'seated_event', label:'Seated event', emoji:'🪑'},
+
+  {key:'dimmed_lights', label:'Dimmed lights', emoji:'💡'},
+  {key:'quiet_atmosphere', label:'Quiet atmosphere', emoji:'🤫'},
+  {key:'quiet_space', label:'Designated quiet space', emoji:'🛋️'},
+
+  {key:'aac_device', label:'AAC device available', emoji:'🗣️'},
+  {key:'signed_event', label:'Signed event', emoji:'🤟'},
+  {key:'captions', label:'Captions for video content', emoji:'🔤'},
+
+  {key:'first_aider', label:'First aider present', emoji:'🩺'},
+  {key:'first_aid_kit', label:'First aid kit available', emoji:'🧰'},
+  {key:'welfare_officer', label:'Welfare officer', emoji:'🧑‍⚕️'},
+  {key:'walk_you', label:"We'll walk you there", emoji:'🧭'},
+  {key:'sober_friendly', label:'Happy to have you sober', emoji:'🚫🍸'},
+
+  {key:'food', label:'Food at event', emoji:'🍽️'},
+  {key:'gluten_free', label:'Gluten-free options', emoji:'🌾🚫'},
+  {key:'vegan', label:'Vegan options', emoji:'🌱'},
+  {key:'vegetarian', label:'Vegetarian options', emoji:'🥗'},
+  {key:'nut_free_options', label:'Nut-free options', emoji:'🥜🚫'},
+  {key:'nut_free_event', label:'Nut-free event', emoji:'🚫🥜'},
+  {key:'bring_own_food', label:'Bring your own food', emoji:'🥡'},
+
+  {key:'printed_digital', label:'Printed media available digitally', emoji:'🖨️💻'},
+  {key:'printed_alt_text', label:'Printed media with alternative text', emoji:'📝'},
+  {key:'off_campus', label:'Off campus event', emoji:'🛣️'}
+];
+
+// We'll map these categories into the braille cells for letters in "Warwick SU"
+// We'll include capital prefix cells for capitals (dot 6 cell)
+// Letters sequence: capital, W, a, r, w, i, c, k, capital, S, capital, U
+
+const letters = ['capital','W','a','r','w','i','c','k','capital','S','capital','U'];
+// Braille map with capital prefix cell (dot 6)
+const brailleMap = {
+  'capital': [6],
+  'W': [2,4,5,6],
+  'a': [1],
+  'r': [1,2,3,5],
+  'w': [2,4,5,6],
+  'i': [2,4],
+  'c': [1,4],
+  'k': [1,3],
+  'S': [2,3,4],
+  'U': [1,3,6]
+};
+
+const cellCount = letters.length;
+const dotsPerCell = 6;
+
+// Build options UI
+const optionsEl = document.getElementById('options');
+categories.forEach((c,i)=>{
+  const id = 'opt-'+c.key;
+  const label = document.createElement('label');
+  label.className='opt';
+  label.htmlFor = id;
+  label.innerHTML = `<input type="checkbox" id="${id}" data-index="${i}" /> <span style="font-size:14px">${c.label}</span>`;
+  optionsEl.appendChild(label);
+});
+
+// Canvas drawing
+const canvas = document.getElementById('stickerCanvas');
+const ctx = canvas.getContext('2d');
+
+// Option B mapping: explicit placement per category (user requested)
+// We'll create a deterministic mapping that assigns each category to a specific braille cell index and dot number.
+// You can edit this mapping later if you'd like certain categories to always appear in particular cells.
+const categoryPlacement = {}; // key -> {cell: number, dot: number}
+(function buildCategoryPlacement(){
+  let catIndex = 0;
+  for (let ci = 0; ci < letters.length && catIndex < categories.length; ci++){
+    const patt = brailleMap[letters[ci]] || [];
+    // place categories into each real dot in the cell, left-to-right
+    for (let p = 0; p < patt.length && catIndex < categories.length; p++){
+      const dotNumber = patt[p];
+      categoryPlacement[categories[catIndex].key] = {cell: ci, dot: dotNumber};
+      catIndex++;
+    }
+  }
+})();
+
+function drawSticker(){
+  // clear
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // background panel
+  ctx.fillStyle = '#ffdff0';
+  roundRect(ctx,0,0,canvas.width,canvas.height,18,true,false);
+
+  // Title text (top-left) - brand
+  ctx.fillStyle = '#3b2667';
+  ctx.font = '28px Inter, sans-serif';
+  ctx.fillText('Warwick SU', 24, 34);
+
+  // Draw braille cells
+  const startX = 24;
+  const startY = 54;
+  const cellW = 82;
+  const cellH = 130;
+  const gap = 6;
+  const dotRadius = 14; // radius of cell dot circle
+
+  // Draw each cell
+  for (let ci = 0; ci < cellCount; ci++) {
+    const cx = startX + ci*(cellW + gap);
+    const cy = startY;
+    // cell background (rounded rectangle)
+    ctx.fillStyle = 'rgba(59,38,103,0.06)';
+    roundRect(ctx, cx, cy, cellW, cellH, 12, true, false);
+
+    // draw 2 columns x 3 rows of dot positions
+    for (let d = 0; d < dotsPerCell; d++) {
+      const col = (d % 2); // 0 or 1
+      const row = Math.floor(d / 2); // 0,1,2
+      const dx = cx + 20 + col*36;
+      const dy = cy + 20 + row*36;
+
+      const dotNumber = d + 1;
+      const pattern = brailleMap[letters[ci]] || [];
+      const isRealDot = pattern.includes(dotNumber);
+
+      // find which category (if any) is explicitly placed on this cell/dot
+      const placedCategory = Object.keys(categoryPlacement).find(k => categoryPlacement[k].cell === ci && categoryPlacement[k].dot === dotNumber);
+      const cat = placedCategory ? categories.find(c=>c.key===placedCategory) : null;
+      const checked = cat ? document.getElementById('opt-'+cat.key).checked : false;
+
+      // draw dot outline only if real braille dot
+      ctx.beginPath();
+      ctx.fillStyle = isRealDot ? '#ffffff' : 'rgba(255,255,255,0)';
+      ctx.strokeStyle = isRealDot ? 'rgba(59,38,103,0.12)' : 'rgba(0,0,0,0)';
+      ctx.lineWidth = 2;
+      ctx.arc(dx, dy, dotRadius, 0, Math.PI*2);
+      if(isRealDot){ ctx.fill(); ctx.stroke(); }
+
+      if (checked && cat && isRealDot) {
+        // draw emoji as icon inside the dot
+        // using fillText emoji; center vertically
+        ctx.font = '18px serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillStyle = '#111827';
+        // Some emojis are multi-codepoint; draw them centered
+        ctx.fillText(cat.emoji, dx, dy+1);
+
+        // draw small raised effect ring
+        ctx.beginPath();
+        ctx.arc(dx, dy, dotRadius+2, 0, Math.PI*2);
+        ctx.strokeStyle = 'rgba(0,0,0,0.06)';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      } else if(!isRealDot) {
+        // invisible placeholder (do nothing) — keep layout
+      } else {
+        // empty dot (subtle)
+        ctx.beginPath();
+        ctx.arc(dx, dy, 4, 0, Math.PI*2);
+        ctx.fillStyle = 'rgba(59,38,103,0.06)';
+        ctx.fill();
+      }
+    }
+  }
+}
+
+function roundRect(ctx, x, y, w, h, r, fill, stroke) {
+  if (r === undefined) r = 5;
+  if (typeof r === 'number') r = {tl: r, tr: r, br: r, bl: r};
+  ctx.beginPath();
+  ctx.moveTo(x + r.tl, y);
+  ctx.lineTo(x + w - r.tr, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r.tr);
+  ctx.lineTo(x + w, y + h - r.br);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r.br, y + h);
+  ctx.lineTo(x + r.bl, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r.bl);
+  ctx.lineTo(x, y + r.tl);
+  ctx.quadraticCurveTo(x, y, x + r.tl, y);
+  ctx.closePath();
+  if (fill) ctx.fill();
+  if (stroke) ctx.stroke();
+}
+
+// Generate detail post grouped by category types
+function generateDetailPost(){
+  // We'll group as in your mock: Toilets, Mobility, Lighting & sensory, Communication, Support, Food, Media & info, Location
+  const groups = {
+    'Toilets': ['toilets','gender_neutral','disabled_toilets','changing_places'],
+    'Mobility & entry': ['step_free','seating','seated_event'],
+    'Lighting & sensory': ['dimmed_lights','quiet_atmosphere','quiet_space'],
+    'Communication': ['aac_device','signed_event','captions'],
+    'Support': ['first_aider','first_aid_kit','welfare_officer','walk_you','sober_friendly'],
+    'Food': ['food','gluten_free','vegan','vegetarian','nut_free_options','nut_free_event','bring_own_food'],
+    'Media & info': ['printed_digital','printed_alt_text'],
+    'Location': ['off_campus']
+  };
+
+  let out = '';
+  Object.keys(groups).forEach(group=>{
+    const keys = groups[group];
+    const selected = keys.map(k=>categories.find(c=>c.key===k)).filter(Boolean).filter(c=>document.getElementById('opt-'+c.key).checked);
+    if(selected.length){
+      out += group + ':\n';
+      selected.forEach(s=> out += ' - ' + s.label + '\n');
+      out += '\n';
+    }
+  });
+  if(!out) out = 'No accessibility features selected.';
+  return out.trim();
+}
+
+// Generate full descriptive alt text
+function generateAltText(){
+  // Alt should describe the sticker visually and list features
+  const enabled = categories.filter((c,i)=> document.getElementById('opt-'+c.key).checked);
+  const title = 'Sticker reading "Warwick SU" in tactile‑style braille cells.';
+  if(enabled.length===0){
+    return title + ' No accessibility features are indicated on the sticker.';
+  }
+  const list = enabled.map(e=> e.label).join(', ');
+  const detail = `The sticker maps each raised braille dot to an icon representing accessibility features. The selected features are: ${list}.`;
+  return `${title} ${detail}`;
+}
+
+// Buttons
+document.getElementById('renderBtn').addEventListener('click', (ev)=>{ ev.preventDefault(); drawSticker(); document.getElementById('detailPost').value = generateDetailPost(); document.getElementById('altText').value = generateAltText(); });
+
+document.getElementById('downloadBtn').addEventListener('click', (ev)=>{ ev.preventDefault(); drawSticker(); const link = document.createElement('a'); link.download = 'Warwick-SU-access-sticker.png'; link.href = canvas.toDataURL('image/png'); link.click(); });
+
+document.getElementById('resetBtn').addEventListener('click', ()=>{ document.querySelectorAll('#options input[type=checkbox]').forEach(cb=>cb.checked=false); drawSticker(); document.getElementById('detailPost').value=''; document.getElementById('altText').value=''; });
+
+// Copy buttons
+document.getElementById('copyAlt').addEventListener('click', ()=>{ navigator.clipboard.writeText(document.getElementById('altText').value || '').then(()=>{ alert('Alt text copied'); }); });
+document.getElementById('copyPost').addEventListener('click', ()=>{ navigator.clipboard.writeText(document.getElementById('detailPost').value || '').then(()=>{ alert('Detail post copied'); }); });
+
+// Initial draw
+// pre-check a few common options for demo
+['toilets','step_free','dimmed_lights','signed_event','food','vegan'].forEach(k=>{ const el = document.getElementById('opt-'+k); if(el) el.checked = true; });
+drawSticker();
+
+</script>
+</body>
+</html>
